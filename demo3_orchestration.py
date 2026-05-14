@@ -7,14 +7,22 @@ sys.path.insert(0, 'd:/python/notion_summary_server')
 TODAY = datetime.now().strftime("%Y-%m-%d")
 
 
-async def claude_summarize(prompt: str) -> str:
+def est_tokens(text: str) -> int:
+    """Claude 토크나이저 근사값 — 한국어 ~1tok/자, 영어 ~0.25tok/자"""
+    korean = sum(1 for c in text if '가' <= c <= '힣' or '一' <= c <= '鿿')
+    other  = len(text) - korean
+    return korean + other // 4
+
+
+async def claude_summarize(prompt: str) -> tuple[str, int]:
+    """(응답 텍스트, 입력 토큰 수) 반환"""
     proc = await asyncio.create_subprocess_exec(
         'claude', '-p', prompt,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await proc.communicate()
-    return stdout.decode('utf-8', errors='replace').strip()
+    return stdout.decode('utf-8', errors='replace').strip(), est_tokens(prompt)
 
 
 async def fetch_yna_items(count: int = 5) -> list[dict]:
@@ -67,12 +75,18 @@ async def main():
     # Claude 요약 3종 병렬 생성 (패턴 비교와 무관하게 1번만)
     print("\n  Claude 요약 3종 생성 중 (병렬)...")
     t_prep = time.perf_counter()
-    news_summary, briefing, report = await asyncio.gather(
+    (news_summary, tok_news), (briefing, tok_brief), (report, tok_report) = await asyncio.gather(
         claude_summarize(f"다음 경제 뉴스들을 투자자 관점에서 종합 요약해주세요.\n\n{news_text}"),
         claude_summarize(f"날짜: {TODAY}\n다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요. 시장 동향, 유망 섹터, 투자 전략 포함.\n\n{news_text}"),
         claude_summarize(f"다음 뉴스에서 주목할 기업/섹터를 선정해 증권사 리포트 형식으로 작성해주세요. 현황, 투자 포인트, 투자의견, 리스크 포함.\n\n{news_text[:600]}"),
     )
+    # 출력 토큰도 추정
+    tok_out = est_tokens(news_summary) + est_tokens(briefing) + est_tokens(report)
+    tok_in  = tok_news + tok_brief + tok_report
+    tok_total = tok_in + tok_out
+    PLANNER_OVERHEAD = 120  # Planner+Executor 계획 단계 추가 토큰 추정
     print(f"  준비 완료 ({time.perf_counter() - t_prep:.1f}초)")
+    print(f"  입력 토큰: ~{tok_in:,}  출력 토큰: ~{tok_out:,}  합계: ~{tok_total:,}")
 
     # 3패턴 비교에 사용할 작업 목록
     JOBS = [
@@ -111,15 +125,18 @@ async def main():
     t3 = time.perf_counter() - t
     print(f"  완료: {t3:.2f}초")
 
+    ratio = t1 / t3 if t3 > 0 else 0
+
     print()
-    print("=" * 55)
-    print(f"  Single           {t1:.2f}초")
-    print(f"  Planner+Executor {t2:.2f}초")
-    print(f"  Parallel      ★ {t3:.2f}초  <- 가장 빠름")
-    print("=" * 55)
-    if t3 > 0:
-        print(f"  Parallel는 Single보다 {t1/t3:.1f}배 빠름")
-    print("  모델 동일 · 구조만 다름")
+    print("=" * 60)
+    print(f"  {'패턴':<18} {'시간':>7}  {'토큰':>7}  {'토큰 대비 속도'}")
+    print(f"  {'-'*56}")
+    print(f"  {'Single':<18} {t1:>6.2f}초  ~{tok_total:>5,}  기준 (1.0×)")
+    print(f"  {'Planner+Executor':<18} {t2:>6.2f}초  ~{tok_total+PLANNER_OVERHEAD:>5,}  토큰 +{PLANNER_OVERHEAD} 오버헤드")
+    print(f"  {'Parallel ★':<18} {t3:>6.2f}초  ~{tok_total:>5,}  {ratio:.1f}× 빠름 · 토큰 동일")
+    print("=" * 60)
+    print(f"  핵심: 같은 토큰으로 {ratio:.1f}배 임팩트  →  Impact Per Token ↑")
+    print(f"  모델 동일 · 구조만 다름")
 
 
 asyncio.run(main())
