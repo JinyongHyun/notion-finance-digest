@@ -1,4 +1,4 @@
-"""발표 화면 3: Orchestration 3패턴 비교 — 주식 리서치 3종 (뉴스종합/주간브리핑/증권사리포트)"""
+"""발표 화면 3: Orchestration 3패턴 비교 — 뉴스종합/주간브리핑/증권사리포트"""
 import asyncio, sys, time, io, httpx, xml.etree.ElementTree as ET
 from datetime import datetime
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -33,59 +33,20 @@ async def fetch_yna_items(count: int = 5) -> list[dict]:
     return result
 
 
-# 3가지 저장 작업 — 같은 뉴스 데이터, 다른 sub_category
-async def save_news_summary(news_text: str) -> float:
+async def save_to_notion(title: str, content: str, sub_category: str, source: str, tags: list) -> float:
+    """Notion 저장만 담당 — Claude 호출 없음"""
     from server import save_summary_to_notion
-    content = await claude_summarize(
-        f"다음 경제 뉴스들을 투자자 관점에서 종합 요약해주세요.\n\n{news_text}"
-    )
     t0 = time.perf_counter()
     await save_summary_to_notion(
-        title=f"[{TODAY}] 뉴스 종합",
+        title=title,
         content=content,
         source_url="https://www.yna.co.kr/economy",
-        category="stock_research", sub_category="뉴스",
-        source="연합뉴스", tags=["경제"],
+        category="stock_research",
+        sub_category=sub_category,
+        source=source,
+        tags=tags,
     )
     return time.perf_counter() - t0
-
-
-async def save_weekly_briefing(news_text: str) -> float:
-    from server import save_summary_to_notion
-    content = await claude_summarize(
-        f"날짜: {TODAY}\n다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요. "
-        f"시장 동향, 유망 섹터, 투자 전략 포함.\n\n{news_text}"
-    )
-    t0 = time.perf_counter()
-    await save_summary_to_notion(
-        title=f"[{TODAY}] 주간 투자 브리핑",
-        content=content,
-        source_url="https://www.yna.co.kr/economy",
-        category="stock_research", sub_category="주간브리핑",
-        source="Claude 자동 수집", tags=["경제", "주간브리핑"],
-    )
-    return time.perf_counter() - t0
-
-
-async def save_research_report(news_text: str) -> float:
-    from server import save_summary_to_notion
-    content = await claude_summarize(
-        f"다음 뉴스에서 주목할 기업/섹터를 선정해 증권사 리포트 형식으로 작성해주세요. "
-        f"현황, 투자 포인트, 투자의견, 리스크 포함.\n\n{news_text[:600]}"
-    )
-    t0 = time.perf_counter()
-    await save_summary_to_notion(
-        title=f"[{TODAY}] 섹터 분석 리포트",
-        content=content,
-        source_url="https://www.yna.co.kr/economy",
-        category="stock_research", sub_category="증권사리포트",
-        source="Claude 자동 분석", tags=["경제"],
-    )
-    return time.perf_counter() - t0
-
-
-TASKS = [save_news_summary, save_weekly_briefing, save_research_report]
-LABELS = ["뉴스종합", "주간브리핑", "증권사리포트"]
 
 
 async def main():
@@ -95,19 +56,39 @@ async def main():
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 55)
 
-    print("\n연합뉴스 경제 RSS에서 최신 뉴스 5건 수집 중...")
+    # ━━ 사전 준비: 뉴스 수집 + Claude 요약 (1번씩만) ━━
+    print("\n[사전 준비] 뉴스 수집 + Claude 요약 생성 중...")
     news_items = await fetch_yna_items(5)
     for i, n in enumerate(news_items, 1):
         print(f"  [{i}] {n['title'][:55]}")
+
     news_text = "\n\n".join(f"[{i+1}] {n['title']}\n{n['desc']}" for i, n in enumerate(news_items))
 
-    print(f"\n저장 작업: {' / '.join(LABELS)}")
+    # Claude 요약 3종 병렬 생성 (패턴 비교와 무관하게 1번만)
+    print("\n  Claude 요약 3종 생성 중 (병렬)...")
+    t_prep = time.perf_counter()
+    news_summary, briefing, report = await asyncio.gather(
+        claude_summarize(f"다음 경제 뉴스들을 투자자 관점에서 종합 요약해주세요.\n\n{news_text}"),
+        claude_summarize(f"날짜: {TODAY}\n다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요. 시장 동향, 유망 섹터, 투자 전략 포함.\n\n{news_text}"),
+        claude_summarize(f"다음 뉴스에서 주목할 기업/섹터를 선정해 증권사 리포트 형식으로 작성해주세요. 현황, 투자 포인트, 투자의견, 리스크 포함.\n\n{news_text[:600]}"),
+    )
+    print(f"  준비 완료 ({time.perf_counter() - t_prep:.1f}초)")
+
+    # 3패턴 비교에 사용할 작업 목록
+    JOBS = [
+        (f"[{TODAY}] 뉴스 종합",        news_summary, "뉴스",     "연합뉴스",      ["경제"]),
+        (f"[{TODAY}] 주간 투자 브리핑", briefing,     "주간브리핑","Claude 자동 수집",["경제"]),
+        (f"[{TODAY}] 섹터 분석 리포트", report,       "증권사리포트","Claude 자동 분석",["경제"]),
+    ]
+
+    print("\n저장 작업: 뉴스종합 / 주간브리핑 / 증권사리포트")
+    print("(이하 패턴 비교는 Notion API 저장 속도만 측정)")
 
     # 패턴 1: Single (순차)
     print("\n패턴 1: Single (순차)  실행 중...")
     t = time.perf_counter()
-    for fn in TASKS:
-        await fn(news_text)
+    for title, content, sub, src, tags in JOBS:
+        await save_to_notion(title, content, sub, src, tags)
     t1 = time.perf_counter() - t
     print(f"  완료: {t1:.2f}초")
 
@@ -115,15 +96,18 @@ async def main():
     print("\n패턴 2: Planner+Executor  실행 중...")
     t = time.perf_counter()
     await asyncio.sleep(0.05)  # Planner 오버헤드
-    for fn in TASKS:
-        await fn(news_text)
+    for title, content, sub, src, tags in JOBS:
+        await save_to_notion(title, content, sub, src, tags)
     t2 = time.perf_counter() - t
     print(f"  완료: {t2:.2f}초")
 
     # 패턴 3: Parallel
     print("\n패턴 3: Parallel (병렬)  실행 중...")
     t = time.perf_counter()
-    await asyncio.gather(*[fn(news_text) for fn in TASKS])
+    await asyncio.gather(*[
+        save_to_notion(title, content, sub, src, tags)
+        for title, content, sub, src, tags in JOBS
+    ])
     t3 = time.perf_counter() - t
     print(f"  완료: {t3:.2f}초")
 
