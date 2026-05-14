@@ -41,11 +41,19 @@ async def fetch_yna_items(count: int = 5) -> list[dict]:
     return result
 
 
-async def save_to_notion(title: str, content: str, sub_category: str, source: str, tags: list) -> float:
-    """분석 처리(2초) + Notion 저장"""
+async def simulate_save(delay: float = 2.0) -> float:
+    """패턴 1·2용: 실제 저장 없이 소요 시간만 시뮬레이션"""
+    t0 = time.perf_counter()
+    await asyncio.sleep(delay)
+    await asyncio.sleep(1.5)   # Notion API 호출 시간 모사
+    return time.perf_counter() - t0
+
+
+async def real_save(title: str, content: str, sub_category: str, source: str, tags: list) -> float:
+    """패턴 3용: 실제 Notion 저장"""
     from server import save_summary_to_notion
     t0 = time.perf_counter()
-    await asyncio.sleep(2.0)   # 뉴스 분석·가공 시간 시뮬레이션
+    await asyncio.sleep(2.0)   # 분석 처리 시간
     await save_summary_to_notion(
         title=title,
         content=content,
@@ -99,32 +107,32 @@ async def main():
     print("\n저장 작업: 뉴스종합 / 주간브리핑 / 증권사리포트")
     print("(이하 패턴 비교는 Notion API 저장 속도만 측정)")
 
-    # 패턴 1: Single (순차)
-    print("\n패턴 1: Single (순차)  실행 중...")
+    # 패턴 1: Single (순차) — 시뮬레이션만
+    print("\n패턴 1: Single (순차)  실행 중...  [시뮬레이션]")
     t = time.perf_counter()
-    for title, content, sub, src, tags in JOBS:
-        await save_to_notion(title, content, sub, src, tags)
+    for _ in JOBS:
+        await simulate_save()
     t1 = time.perf_counter() - t
     print(f"  완료: {t1:.2f}초")
 
-    # 패턴 2: Planner+Executor
-    print("\n패턴 2: Planner+Executor  실행 중...")
+    # 패턴 2: Planner+Executor — 시뮬레이션만
+    print("\n패턴 2: Planner+Executor  실행 중...  [시뮬레이션]")
     t = time.perf_counter()
     await asyncio.sleep(0.05)  # Planner 오버헤드
-    for title, content, sub, src, tags in JOBS:
-        await save_to_notion(title, content, sub, src, tags)
+    for _ in JOBS:
+        await simulate_save()
     t2 = time.perf_counter() - t
     print(f"  완료: {t2:.2f}초")
 
-    # 패턴 3: Parallel
-    print("\n패턴 3: Parallel (병렬)  실행 중...")
+    # 패턴 3: Parallel — 실제 Notion 저장
+    print("\n패턴 3: Parallel (병렬)  실행 중...  [실제 Notion 저장]")
     t = time.perf_counter()
     await asyncio.gather(*[
-        save_to_notion(title, content, sub, src, tags)
+        real_save(title, content, sub, src, tags)
         for title, content, sub, src, tags in JOBS
     ])
     t3 = time.perf_counter() - t
-    print(f"  완료: {t3:.2f}초")
+    print(f"  완료: {t3:.2f}초  → Notion에 3페이지 저장됨")
 
     ratio = t1 / t3 if t3 > 0 else 0
 
