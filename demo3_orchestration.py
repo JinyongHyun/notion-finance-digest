@@ -42,9 +42,10 @@ async def fetch_yna_items(count: int = 5) -> list[dict]:
 
 
 async def save_to_notion(title: str, content: str, sub_category: str, source: str, tags: list) -> float:
-    """Notion 저장만 담당 — Claude 호출 없음"""
+    """분석 처리(2초) + Notion 저장"""
     from server import save_summary_to_notion
     t0 = time.perf_counter()
+    await asyncio.sleep(2.0)   # 뉴스 분석·가공 시간 시뮬레이션
     await save_summary_to_notion(
         title=title,
         content=content,
