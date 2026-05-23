@@ -55,6 +55,7 @@ async def save_summary_to_notion(
     source: str = "",
     tags: list[str] | None = None,
     difficulty: str = "",
+    icon: str = "",
 ) -> str:
     """논문 요약 또는 주식 리서치/공부노트를 Notion에 저장합니다.
 
@@ -121,6 +122,7 @@ async def save_summary_to_notion(
             payload = {
                 "parent": {"database_id": db_id},
                 "properties": properties,
+                **({"icon": {"type": "emoji", "emoji": icon}} if icon else {}),
                 "children": [
                     {
                         "object": "block",

@@ -1,4 +1,4 @@
-# Claude Code 작업 규칙
+# Codex 작업 규칙
 
 ## 논문 리뷰 / 기사 요약 → Notion 저장
 
@@ -86,4 +86,4 @@
 - `category="stock_research"`, `sub_category="주간브리핑"`
 - `title`: "YYYY-MM-DD 주간 투자 브리핑"
 - `tags`: 해당 주 핵심 섹터 태그 포함
-- `source`: "Claude 자동 수집"
+- `source`: "Codex 자동 수집"
