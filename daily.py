@@ -2,6 +2,7 @@
 import asyncio, sys, io, httpx, xml.etree.ElementTree as ET, os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import anthropic
 import yfinance as yf
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -52,47 +53,19 @@ async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: 
 async def claude_summarize(prompt: str) -> str:
     system_prompt = (
         "당신은 투자 콘텐츠 초안을 작성하는 순수 텍스트 생성기입니다. "
-        "절대 Notion, MCP, 파일, 웹, Bash, 기타 도구를 호출하지 마세요. "
         "사용자가 제공한 자료만 종합해 최종 본문 텍스트만 출력하세요. "
         "페이지 생성, 저장, 업데이트, 링크 생성은 하지 않습니다."
     )
-    proc = await asyncio.create_subprocess_exec(
-        'claude',
-        '--print',
-        '--no-session-persistence',
-        '--strict-mcp-config',
-        '--tools=',
-        '--append-system-prompt', system_prompt,
-        '--disallowedTools',
-        (
-            'mcp__notion_summary_server__save_summary_to_notion,'
-            'mcp__notion_summary_server__update_notion_page,'
-            'mcp__claude_ai_Notion__notion-fetch,'
-            'mcp__claude_ai_Notion__notion-create-pages,'
-            'mcp__claude_ai_Notion__notion-update-page,'
-            'mcp__claude_ai_Notion__notion-move-pages,'
-            'mcp__claude_ai_Notion__notion-duplicate-page'
-        ),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    message = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": prompt}],
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(input=prompt.encode('utf-8')), timeout=180)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-        raise RuntimeError("Claude 요약 생성 시간이 180초를 초과했습니다.")
-
-    if proc.returncode != 0:
-        message = stderr.decode('utf-8', errors='replace').strip()
-        raise RuntimeError(f"Claude 요약 생성 실패: {message or '알 수 없는 오류'}")
-
-    summary = stdout.decode('utf-8', errors='replace').strip()
+    summary = message.content[0].text.strip()
     if not summary:
         raise RuntimeError("Claude 요약 결과가 비어 있어 Notion 저장을 중단합니다.")
-    if "notion.so/" in summary or "Notion 페이지" in summary:
-        raise RuntimeError("Claude가 Notion 생성 결과를 반환해 저장을 중단합니다.")
     return summary
 
 
