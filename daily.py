@@ -57,20 +57,36 @@ async def claude_summarize(prompt: str) -> str:
     return stdout.decode('utf-8', errors='replace').strip()
 
 
-async def fetch_yna_items(count: int = 5) -> list[dict]:
-    async with httpx.AsyncClient() as c:
-        r = await c.get("https://www.yna.co.kr/rss/economy.xml", follow_redirects=True, timeout=15)
+async def _fetch_rss(client: httpx.AsyncClient, url: str, source: str, count: int) -> list[dict]:
+    r = await client.get(url, follow_redirects=True, timeout=15,
+                         headers={"User-Agent": "Mozilla/5.0"})
     root = ET.fromstring(r.content)
-    items = root.findall('.//item')
     result = []
-    for item in items[:count]:
+    for item in root.findall('.//item')[:count]:
         desc_elem = item.find('description')
+        desc = (desc_elem.text or "") if desc_elem is not None else ""
         result.append({
-            "title": item.find('title').text or "경제 뉴스",
-            "desc":  (desc_elem.text or "")[:300],
-            "url":   item.find('link').text or "https://www.yna.co.kr",
+            "title":  item.find('title').text or "뉴스",
+            "desc":   desc[:300],
+            "url":    item.find('link').text or url,
+            "source": source,
         })
     return result
+
+
+async def fetch_yna_items(count: int = 5) -> list[dict]:
+    async with httpx.AsyncClient() as c:
+        return await _fetch_rss(c, "https://www.yna.co.kr/rss/economy.xml", "연합뉴스", count)
+
+
+async def fetch_finance_news(count_each: int = 4) -> list[dict]:
+    """한국경제·매일경제 금융/증권 뉴스 수집"""
+    async with httpx.AsyncClient() as c:
+        hk, mk = await asyncio.gather(
+            _fetch_rss(c, "https://www.hankyung.com/feed/finance", "한국경제", count_each),
+            _fetch_rss(c, "https://www.mk.co.kr/rss/30100041/", "매일경제", count_each),
+        )
+    return hk + mk
 
 
 async def fetch_arxiv_paper() -> dict:
@@ -120,9 +136,14 @@ async def main():
 
     # 2. 데이터 수집
     print(f"\n데이터 수집 중...")
-    news_items = await fetch_yna_items(5)
+    news_items, finance_items = await asyncio.gather(fetch_yna_items(5), fetch_finance_news(4))
     news_text = "\n\n".join(f"[{i+1}] {n['title']}\n{n['desc']}" for i, n in enumerate(news_items))
+    finance_text = "\n\n".join(
+        f"[{i+1}] [{n['source']}] {n['title']}\n{n['desc']}"
+        for i, n in enumerate(finance_items)
+    )
     print(f"  연합뉴스: {len(news_items)}건")
+    print(f"  한국경제·매일경제: {len(finance_items)}건")
 
     # 3. 필요한 항목만 Claude 요약 생성 (병렬)
     print(f"\nClaude 요약 생성 중 (필요한 {len(need)}개만)...")
@@ -178,13 +199,15 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 {news_text}""",
 
         # ③ 증권사리포트
-        ITEMS[2]["check"]: f"""다음 뉴스에서 가장 주목할 기업 또는 섹터를 선정해 증권사 분석 리포트를 작성해주세요.
+        ITEMS[2]["check"]: f"""다음은 한국경제·매일경제의 금융·증권 뉴스입니다.
+가장 주목할 기업 또는 섹터를 선정해 증권사 분석 리포트 형식으로 작성해주세요.
 
 형식 규칙:
 - ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
 - 섹션 제목과 본문에 내용에 어울리는 이모지를 자유롭게 선택해 포함
 - 리포트 상단에 "선정 기업/섹터: ○○○" 한 줄 먼저 작성
+- 뉴스에 등장한 실제 증권사명(KB증권, 키움증권, 삼성증권 등)이 있으면 반드시 언급
 
 섹션 구성 (4개):
 ━━━ 기업·섹터 현황 ━━━
@@ -194,13 +217,13 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 이 기업·섹터에 주목해야 하는 핵심 이유 2~3가지를 설명해주세요.
 
 ━━━ 투자의견 ━━━
-현재 밸류에이션, 목표주가 수준, 투자의견(매수/중립/매도)을 제시해주세요.
+뉴스에 언급된 증권사 의견, 목표주가, 투자의견(매수/중립/매도)을 포함해 작성해주세요.
 
 ━━━ 리스크 요인 ━━━
 투자 시 주의해야 할 리스크 요인과 모니터링 포인트를 설명해주세요.
 
-뉴스 목록:
-{news_text[:800]}""",
+뉴스 목록 (한국경제·매일경제):
+{finance_text}""",
 
         # ④ 공부노트
         ITEMS[3]["check"]: f"""다음 뉴스와 관련된 핵심 투자 개념 1가지를 골라 공부노트를 작성해주세요.
@@ -260,9 +283,9 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
         elif item["label"].startswith("③"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 섹터 분석 리포트", content=summary,
-                source_url="https://www.yna.co.kr/economy",
+                source_url="https://www.hankyung.com/finance",
                 category="stock_research", sub_category="증권사리포트",
-                source="연합뉴스", tags=["경제"],
+                source="한국경제·매일경제", tags=["경제"],
             )
         elif item["label"].startswith("④"):
             result = await save_summary_to_notion(
