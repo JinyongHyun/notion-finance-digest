@@ -48,6 +48,8 @@ async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: 
 async def claude_summarize(prompt: str) -> str:
     proc = await asyncio.create_subprocess_exec(
         'claude', '-p', prompt,
+        '--disallowedTools',
+        'mcp__notion_summary_server__save_summary_to_notion,mcp__notion_summary_server__update_notion_page',
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -253,14 +255,14 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
                 title=f"[{TODAY}] 주간 투자 브리핑", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="주간브리핑",
-                source="Claude 자동 수집", tags=["경제"],
+                source="연합뉴스", tags=["경제"],
             )
         elif item["label"].startswith("③"):
             result = await save_summary_to_notion(
                 title=f"[{TODAY}] 섹터 분석 리포트", content=summary,
                 source_url="https://www.yna.co.kr/economy",
                 category="stock_research", sub_category="증권사리포트",
-                source="Claude 자동 분석", tags=["경제"],
+                source="연합뉴스", tags=["경제"],
             )
         elif item["label"].startswith("④"):
             result = await save_summary_to_notion(
