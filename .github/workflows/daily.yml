@@ -1,0 +1,28 @@
+name: Daily Notion Summary
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 오전 9시 KST (= UTC 00:00)
+  workflow_dispatch:       # 수동 실행 버튼
+
+jobs:
+  run-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt yfinance
+
+      - name: Run daily_action.py
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python daily_action.py
