@@ -1,6 +1,6 @@
 """daily_action.py — GitHub Actions 전용 (daily.py와 동일 로직, Windows 경로 제거)"""
 import asyncio, sys, httpx, xml.etree.ElementTree as ET, os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import anthropic
 import yfinance as yf
@@ -8,14 +8,16 @@ import holidays
 
 load_dotenv()
 
-TODAY = datetime.now().strftime("%Y-%m-%d")
+KST = timezone(timedelta(hours=9))
+_now = datetime.now(KST)
+TODAY = _now.strftime("%Y-%m-%d")
 
-if datetime.now().weekday() not in (0, 2, 4):
+if _now.weekday() not in (0, 2, 4):
     print(f"오늘({TODAY})은 실행일이 아닙니다 (월·수·금만 실행). 건너뜁니다.")
     sys.exit(0)
 
-_kr_holidays = holidays.KR(years=datetime.now().year)
-if datetime.now().date() in _kr_holidays:
+_kr_holidays = holidays.KR(years=_now.year)
+if _now.date() in _kr_holidays:
     print(f"오늘({TODAY})은 한국 공휴일입니다. 건너뜁니다.")
     sys.exit(0)
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
