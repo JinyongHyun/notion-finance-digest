@@ -52,8 +52,9 @@ notion_summary_server/
 - **주말**: cron 스케줄 + 스크립트 내부 이중 차단
 - **공휴일**: 한국 공휴일 자동 감지 후 스킵 (`holidays` 라이브러리)
 - **수동 실행**: GitHub → Actions → Daily Notion Summary → Run workflow (주말·공휴일엔 스킵)
-- **필요 Secrets**: `NOTION_API_KEY`, `ANTHROPIC_API_KEY`
-- **Node.js**: 24 강제 적용 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`)
+- **필요 Secrets**: `NOTION_API_KEY`, `GEMINI_API_KEY`
+- **Node.js**: 24 강제 적용 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'`)
+- **AI 모델**: Gemini 2.0 Flash (무료 티어 — 하루 1,500회 한도, 실사용 3회)
 
 ### 저장 항목 (3개)
 
@@ -64,7 +65,7 @@ notion_summary_server/
 | ③ Claude 인사이트 | `[YYYY-MM-DD] Claude 인사이트` | 🔍 | 주식 리서치 |
 
 - 오늘 날짜 페이지가 이미 있으면 자동 스킵
-- 3개 항목 Claude 요약 병렬 생성 후 순차 저장
+- 3개 항목 Gemini 요약 병렬 생성 후 순차 저장
 
 ### 데이터 소스
 
@@ -135,7 +136,7 @@ D:\Anaconda3\envs\project\python.exe
 ### 의존성 설치
 
 ```powershell
-& "D:\Anaconda3\envs\project\python.exe" -m pip install httpx python-dotenv mcp yfinance holidays
+& "D:\Anaconda3\envs\project\python.exe" -m pip install httpx python-dotenv mcp yfinance holidays google-generativeai
 ```
 
 ### 환경변수 (.env)
