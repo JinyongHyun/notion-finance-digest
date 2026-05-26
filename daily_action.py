@@ -65,7 +65,7 @@ async def claude_summarize(prompt: str) -> str:
     )
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     response = await client.aio.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
