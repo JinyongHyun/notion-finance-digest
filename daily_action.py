@@ -227,7 +227,12 @@ def _make_prompt(label: str, news_items: list, finance_items: list, naver_items:
         for i, r in enumerate(naver_items)
     ) if naver_items else "(수집 없음)"
     if label.startswith("①"):
-        return f"""다음 {len(news_items)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
+        combined = news_items + finance_items
+        combined_text = "\n\n".join(
+            f"[{i+1}] [{n.get('source', '뉴스')}] {n['title']}\n{n['desc']}"
+            for i, n in enumerate(combined)
+        )
+        return f"""다음 {len(combined)}개 경제 뉴스를 투자자 관점에서 종합 분석해주세요.
 
 형식 규칙:
 - ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
@@ -247,10 +252,15 @@ def _make_prompt(label: str, news_items: list, finance_items: list, naver_items:
 ━━━ 투자 시사점 ━━━
 개인 투자자 입장에서 실질적으로 참고할 만한 내용을 서술해주세요.
 
-뉴스 목록:
-{news_text}"""
+뉴스 목록 (연합뉴스 + 한국경제·매일경제):
+{combined_text}"""
 
     if label.startswith("②"):
+        combined = news_items + finance_items
+        combined_text = "\n\n".join(
+            f"[{i+1}] [{n.get('source', '뉴스')}] {n['title']}\n{n['desc']}"
+            for i, n in enumerate(combined)
+        )
         return f"""날짜: {TODAY}
 다음 뉴스를 바탕으로 주간 투자 브리핑을 작성해주세요.
 
@@ -272,8 +282,8 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 ━━━ 이번 주 투자 전략 ━━━
 리스크 관리와 관심 가져야 할 투자 포인트를 제시해주세요.
 
-뉴스 목록:
-{news_text}"""
+뉴스 목록 (연합뉴스 + 한국경제·매일경제):
+{combined_text}"""
 
     if label.startswith("③"):
         return f"""날짜: {TODAY}
@@ -342,7 +352,7 @@ async def main():
 
     need_labels  = {item["label"][0] for item in need}
     need_yna     = bool(need_labels & {'①', '②', '③'})
-    need_finance = '③' in need_labels
+    need_finance = bool(need_labels & {'①', '②', '③'})
     need_global  = '③' in need_labels
     need_naver   = '③' in need_labels
     need_market  = '③' in need_labels
@@ -372,11 +382,24 @@ async def main():
             elif key == 'global':  global_items  = data
             elif key == 'naver':   naver_items   = data
 
-    if news_items:    print(f"  연합뉴스: {len(news_items)}건")
-    if finance_items: print(f"  국내 경제지(한국경제·매일경제): {len(finance_items)}건")
+    print(f"  연합뉴스: {len(news_items)}건")
+    print(f"  국내 경제지(한국경제·매일경제): {len(finance_items)}건")
     if global_items:  print(f"  해외(Reuters·CNBC·MarketWatch·연합뉴스 국제): {len(global_items)}건")
     if naver_items:   print(f"  네이버 금융 리서치: {len(naver_items)}건")
     if market_text:   print(f"  시장 데이터: KOSPI·KOSDAQ·S&P500 등 8개 지표")
+
+    # ①② 저장 항목은 연합뉴스 + 국내 경제지 합산이 0건이면 스킵
+    if not news_items and not finance_items:
+        for item in need[:]:
+            if item["label"][0] in ('①', '②'):
+                print(f"  → {item['label']}: 국내 뉴스 0건으로 저장 건너뜁니다")
+                skip[item["check"]] = True
+                need.remove(item)
+
+    if not need:
+        print(f"\n  저장할 항목이 없습니다 (데이터 없음).")
+        print("=" * 45)
+        return
 
     print(f"\nClaude 요약 생성 중 (필요한 {len(need)}개만)...")
     prompts = {
