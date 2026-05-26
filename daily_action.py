@@ -2,7 +2,7 @@
 import asyncio, sys, httpx, xml.etree.ElementTree as ET, os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from groq import AsyncGroq
+import anthropic
 import yfinance as yf
 import holidays
 
@@ -10,8 +10,8 @@ load_dotenv()
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 
-if datetime.now().weekday() >= 5:
-    print(f"오늘({TODAY})은 주말입니다. 건너뜁니다.")
+if datetime.now().weekday() not in (0, 2, 4):
+    print(f"오늘({TODAY})은 실행일이 아닙니다 (월·수·금만 실행). 건너뜁니다.")
     sys.exit(0)
 
 _kr_holidays = holidays.KR(years=datetime.now().year)
@@ -62,18 +62,16 @@ async def claude_summarize(prompt: str) -> str:
         "사용자가 제공한 자료만 종합해 최종 본문 텍스트만 출력하세요. "
         "페이지 생성, 저장, 업데이트, 링크 생성은 하지 않습니다."
     )
-    client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
-    response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    message = await client.messages.create(
+        model="claude-sonnet-4-6",
         max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": prompt}],
     )
-    summary = response.choices[0].message.content.strip()
+    summary = message.content[0].text.strip()
     if not summary:
-        raise RuntimeError("Groq 요약 결과가 비어 있어 Notion 저장을 중단합니다.")
+        raise RuntimeError("Claude 요약 결과가 비어 있어 Notion 저장을 중단합니다.")
     return summary
 
 
