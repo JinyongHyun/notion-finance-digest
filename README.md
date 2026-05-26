@@ -56,6 +56,9 @@ notion_summary_server/
 - **필요 Secrets**: `NOTION_API_KEY`, `ANTHROPIC_API_KEY`
 - **Node.js**: 24 강제 적용 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'`)
 - **AI 모델**: Claude Sonnet 4.6 (Anthropic API, 1회 약 $0.08, 월 약 $1.04)
+- **RSS 재시도**: 0건 반환 시 3초 간격으로 최대 2회 자동 재시도 (일시적 서버 불안정 대응)
+- **뉴스 폴백**: 연합뉴스 0건 시 한국경제·매일경제로 ①② 콘텐츠 생성
+- **빈 콘텐츠 방지**: 모든 국내 뉴스 소스가 0건이면 ①② 저장 스킵
 
 ### 저장 항목 (3개)
 
