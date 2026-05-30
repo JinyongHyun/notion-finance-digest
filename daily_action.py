@@ -1,5 +1,6 @@
 """daily_action.py — GitHub Actions 전용 (daily.py와 동일 로직, Windows 경로 제거)"""
-import asyncio, sys, httpx, xml.etree.ElementTree as ET, os
+import asyncio, sys, io, httpx, xml.etree.ElementTree as ET, os
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import anthropic
@@ -20,6 +21,7 @@ _kr_holidays = holidays.KR(years=_now.year)
 if _now.date() in _kr_holidays:
     print(f"오늘({TODAY})은 한국 공휴일입니다. 건너뜁니다.")
     sys.exit(0)
+
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -32,13 +34,61 @@ DB = {
     "stock_study":    os.getenv("NOTION_STOCK_STUDY_DB_ID",    "d1afcb876857487eb978c1a8e0952d05"),
 }
 
+PORTFOLIO_HOLDINGS = (
+    "현재 보유 종목:\n"
+    "- 삼성전자 (국내 개별주)\n"
+    "- TIGER 미국S&P500 (S&P500 ETF) — 목표 비중 60%\n"
+    "- KODEX 골드선물(H) (금 ETF) — 목표 비중 15%\n"
+    "- ACE 미국30년국채액티브 (미국채 ETF 현물) — 목표 비중 25%\n"
+    "- KIWOOM 국고채10년 (한국채권 ETF)\n"
+    "- SOL 미국양자컴퓨팅TOP10 (테마 ETF)\n"
+    "총 평가금액: 5,662,110원 / 수익률: +22.59%\n"
+    "투자 방식: 목돈 집중 투자 (50만원↑ 모이면 시장 상황 보고 집중 매수, 월요일 오전 우선)\n"
+    "매수 판단 기준: 지수 조정(-5%↑)→적극매수 / 과열(이격도 과대)→현금보유 / 횡보→소액분할"
+)
+
 ITEMS = [
     {"label": "① 뉴스 종합",      "db": "stock_research", "check": f"[{TODAY}] 경제 뉴스 종합"},
     {"label": "② 주간브리핑",     "db": "stock_research", "check": f"[{TODAY}] 주간 투자 브리핑"},
     {"label": "③ Claude인사이트", "db": "stock_research", "check": f"[{TODAY}] Claude 인사이트"},
+    {"label": "④ 포트폴리오",     "db": "stock_research", "check": f"[{TODAY}] 포트폴리오 브리핑"},
 ]
 
+RETENTION_DAYS = {
+    "뉴스":       14,
+    "주간브리핑": 30,
+    "산업분석":   60,
+    "포트폴리오": 60,
+}
+
 _title_prop_cache: dict[str, str] = {}
+
+
+async def cleanup_old_entries(client: httpx.AsyncClient) -> int:
+    """보존 기간이 지난 stock_research 항목을 아카이브합니다."""
+    db_id = DB["stock_research"]
+    total = 0
+    for category, days in RETENTION_DAYS.items():
+        cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+        r = await client.post(
+            f"https://api.notion.com/v1/databases/{db_id}/query",
+            headers=HEADERS,
+            json={"filter": {"and": [
+                {"property": "카테고리", "select": {"equals": category}},
+                {"property": "날짜",    "date":   {"before": cutoff}},
+            ]}},
+        )
+        pages = r.json().get("results", [])
+        for page in pages:
+            await client.patch(
+                f"https://api.notion.com/v1/pages/{page['id']}",
+                headers=HEADERS,
+                json={"archived": True},
+            )
+        if pages:
+            print(f"  [{category}] {len(pages)}개 삭제 ({days}일 초과)")
+        total += len(pages)
+    return total
 
 
 async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: str) -> bool:
@@ -56,6 +106,7 @@ async def already_saved(client: httpx.AsyncClient, db_key: str, title_contains: 
         json={"filter": {"property": title_prop, "title": {"contains": title_contains}}}
     )
     return len(r2.json().get("results", [])) > 0
+
 
 
 async def claude_summarize(prompt: str) -> str:
@@ -96,7 +147,6 @@ async def _fetch_rss(client: httpx.AsyncClient, url: str, source: str, count: in
                 })
             if result:
                 return result
-            # 0건이면 재시도
         except Exception:
             pass
         if attempt < retries:
@@ -232,6 +282,7 @@ def _make_prompt(label: str, news_items: list, finance_items: list, naver_items:
         f"[{i+1}] [{r['brokerage']}] {r['stock']} | {r['title']} ({r['date']})"
         for i, r in enumerate(naver_items)
     ) if naver_items else "(수집 없음)"
+
     if label.startswith("①"):
         combined = news_items + finance_items
         combined_text = "\n\n".join(
@@ -302,7 +353,7 @@ KOSPI·KOSDAQ 흐름, 수급 동향, 국내 주요 이슈를 설명해주세요.
 - 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
 - 수치, 종목명, 섹터명에 이모지를 자유롭게 활용
 
-섹션 구성 (4개):
+섹션 구성 (5개):
 ━━━ 주목 산업 심층 분석 ━━━
 오늘 데이터에서 가장 주목할 산업 1~2개를 선정하고, 그 이유와 향후 3~6개월 전망을 Claude의 시각으로 분석해주세요. 증권사들이 같은 섹터에 집중하는 이유도 분석해주세요.
 
@@ -311,6 +362,9 @@ KOSPI, KOSDAQ, S&P500 등 주요 지수의 현재 흐름과 단기 방향성에 
 
 ━━━ 시장이 놓치고 있는 것 ━━━
 현재 뉴스나 리포트에서 충분히 다루지 않지만 투자자가 주목해야 할 잠재 리스크 또는 기회를 Claude의 시각으로 제시해주세요.
+
+━━━ ETF 추천 ━━━
+현재 시장 상황에서 투자 매력이 높은 ETF를 구체적으로 추천해주세요. 한국 ETF(TIGER·KODEX·SOL·ACE·KIWOOM 계열 등)와 해외 ETF(QQQ·SPY·SOXX·TLT·GLD 등) 각각 1~2개씩, 추천 근거·현재 진입 매력도·핵심 리스크를 포함하여 서술해주세요.
 
 ━━━ Claude의 핵심 의견 ━━━
 이번 주 투자자가 가장 집중해야 할 1가지 핵심 포인트를 Claude가 직접 제시하고, 그 근거를 설득력 있게 설명해주세요.
@@ -330,6 +384,43 @@ KOSPI, KOSDAQ, S&P500 등 주요 지수의 현재 흐름과 단기 방향성에 
 오늘의 증권사 리포트 목록 (네이버 금융):
 {naver_text}"""
 
+    if label.startswith("④"):
+        combined = news_items + finance_items
+        combined_text = "\n\n".join(
+            f"[{i+1}] [{n.get('source', '뉴스')}] {n['title']}\n{n['desc']}"
+            for i, n in enumerate(combined[:10])
+        )
+        return f"""날짜: {TODAY}
+다음 시장 데이터와 뉴스를 바탕으로 아래 포트폴리오에 특화된 브리핑과 Claude의 인사이트를 제공해주세요.
+
+⚠️ 중요: 실제 보유 종목 기준으로 각 자산의 현재 상황을 분석하고, 목돈 집중 투자 방식에 맞는 실용적인 매수 판단을 제시하세요. 단순 뉴스 요약이 아닌 포트폴리오 맞춤형 분석입니다.
+
+형식 규칙:
+- ## 헤더 절대 금지. 섹션 구분은 반드시 "━━━ 이모지 섹션명 ━━━" 형식만 사용
+- 짧은 bullet 나열 금지 — 각 섹션을 4~6문장의 문단으로 서술
+- 수치, 종목명, 이모지를 자연스럽게 활용
+
+{PORTFOLIO_HOLDINGS}
+
+섹션 구성 (4개):
+━━━ 📊 보유 종목별 현황 분석 ━━━
+삼성전자, TIGER 미국S&P500, KODEX 골드선물(H), ACE 미국30년국채액티브, KIWOOM 국고채10년, SOL 미국양자컴퓨팅TOP10 각각의 최근 시장 흐름과 현재 상태를 분석해주세요.
+
+━━━ ⏰ 이번 주 매수 타이밍 판단 ━━━
+현재 시장이 과열·조정·횡보 중 어디에 해당하는지 판단하고, 목돈 집중 투자 기준으로 이번 주 추가 매수 여부와 우선 비중(어떤 종목을 얼마나)을 구체적으로 제안해주세요.
+
+━━━ ⚠️ 포트폴리오 리스크 점검 ━━━
+현재 보유 구조의 주요 리스크(달러/원 환율, 미국채 금리 방향, SOL 양자컴퓨팅 테마 변동성 등)를 분석하고, 방어 또는 헤지 전략을 제시해주세요.
+
+━━━ 💡 Claude의 포트폴리오 인사이트 ━━━
+이 포트폴리오의 구조적 강점과 개선 가능한 부분에 대한 Claude만의 솔직하고 구체적인 시각을 제시해주세요. 장기 관점에서의 조언도 포함해주세요.
+
+📊 주요 시장 지표 (실시간):
+{market_text if market_text else "(수집 없음)"}
+
+오늘의 주요 뉴스 (국내 + 해외 상위 10건):
+{combined_text if combined_text.strip() else "(수집 없음)"}"""
+
     return ""
 
 
@@ -338,6 +429,13 @@ async def main():
 
     print(f"[{TODAY}] 일일 Notion 저장")
     print("=" * 45)
+
+    print("오래된 항목 정리 중...")
+    async with httpx.AsyncClient(timeout=30) as cleanup_client:
+        deleted = await cleanup_old_entries(cleanup_client)
+    if deleted == 0:
+        print("  정리할 항목 없음")
+    print()
 
     print("저장 여부 확인 중...")
     async with httpx.AsyncClient(timeout=30) as check_client:
@@ -357,11 +455,11 @@ async def main():
         return
 
     need_labels  = {item["label"][0] for item in need}
-    need_yna     = bool(need_labels & {'①', '②', '③'})
-    need_finance = bool(need_labels & {'①', '②', '③'})
-    need_global  = '③' in need_labels
-    need_naver   = '③' in need_labels
-    need_market  = '③' in need_labels
+    need_yna     = bool(need_labels & {'①', '②', '③', '④'})
+    need_finance = bool(need_labels & {'①', '②', '③', '④'})
+    need_global  = bool(need_labels & {'③', '④'})
+    need_naver   = bool(need_labels & {'③'})
+    need_market  = bool(need_labels & {'③', '④'})
 
     print(f"\n데이터 수집 중...")
     news_items, finance_items, global_items, naver_items = [], [], [], []
@@ -394,7 +492,7 @@ async def main():
     if naver_items:   print(f"  네이버 금융 리서치: {len(naver_items)}건")
     if market_text:   print(f"  시장 데이터: KOSPI·KOSDAQ·S&P500 등 8개 지표")
 
-    # ①② 저장 항목은 연합뉴스 + 국내 경제지 합산이 0건이면 스킵
+    # ①② 저장 항목은 연합뉴스 + 국내 경제지 합산이 0건이면 스킵 (④는 시장 데이터만으로도 진행)
     if not news_items and not finance_items:
         for item in need[:]:
             if item["label"][0] in ('①', '②'):
@@ -420,7 +518,7 @@ async def main():
 
     for item in ITEMS:
         key = item["check"]
-        if skip[key]:
+        if skip.get(key):
             print(f"  {item['label']:<14} — 건너뜀")
             continue
 
@@ -449,6 +547,14 @@ async def main():
                 source_url="https://finance.naver.com/research/",
                 category="stock_research", sub_category="산업분석",
                 source="Claude 자체분석", tags=["경제", "인사이트"], icon="🔍",
+            )
+        elif label.startswith("④"):
+            result = await save_summary_to_notion(
+                title=f"[{TODAY}] 포트폴리오 브리핑",
+                content=summary,
+                source_url="https://app.notion.com/p/33117b872be681e99650d41885035b99",
+                category="stock_research", sub_category="포트폴리오",
+                source="Claude 자체분석", tags=["포트폴리오", "인사이트"], icon="💼",
             )
 
         ok = "완료" in result
