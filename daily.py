@@ -6,8 +6,8 @@ import anthropic
 import yfinance as yf
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-load_dotenv('d:/projects/python/notion_summary_server/.env')
-sys.path.insert(0, 'd:/projects/python/notion_summary_server')
+load_dotenv('d:/projects/python/notion-finance-digest/.env')
+sys.path.insert(0, 'd:/projects/python/notion-finance-digest')
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")

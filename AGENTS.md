@@ -2,7 +2,7 @@
 
 ## 논문 리뷰 / 기사 요약 → Notion 저장
 
-- 논문 정리, 리뷰, 요약 요청이 오면 **텍스트로 답변하지 말고** 반드시 `mcp__notion_summary_server__save_summary_to_notion` 도구로 Notion에 저장한다.
+- 논문 정리, 리뷰, 요약 요청이 오면 **텍스트로 답변하지 말고** 반드시 `mcp__notion_finance_digest__save_summary_to_notion` 도구로 Notion에 저장한다.
 - 명시적으로 "텍스트로 알려줘"라고 한 경우만 예외.
 
 ## Notion 콘텐츠 포맷
@@ -52,7 +52,7 @@
 매일 아래 명령어로 실행. 오늘 날짜 페이지가 이미 있으면 자동 스킵.
 
 ```powershell
-& "D:\Anaconda3\envs\project\python.exe" "D:\projects\python\notion_summary_server\daily.py"
+& "D:\Anaconda3\envs\project\python.exe" "D:\projects\python\notion-finance-digest\daily.py"
 ```
 
 ### 자동 저장 항목 3개

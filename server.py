@@ -15,7 +15,7 @@ NOTION_STOCK_STUDY_DB_ID = os.getenv("NOTION_STOCK_STUDY_DB_ID", "d1afcb87685748
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
-mcp = FastMCP("notion_summary_server")
+mcp = FastMCP("notion_finance_digest")
 
 
 async def _get_title_property_name(client: httpx.AsyncClient, headers: dict, db_id: str) -> str:
